@@ -2,6 +2,49 @@ use curl::easy::{Easy, List};
 use std::{fs::File, io::{ stdout, Write }};
 use ansi_term::Colour::{ Green, Red, Yellow };
 
+struct BuildAPIRequest {
+    request: String
+}
+
+impl BuildAPIRequest {
+    fn new() -> Self {
+        BuildAPIRequest { request: "".to_string() }
+    }
+
+    fn search(&mut self) -> &mut Self {
+        self.request.push_str("/search");
+        self
+    }
+
+    fn repo(&mut self) -> &mut Self {
+        self.request.push_str("/repositories");
+        self
+    }
+
+    fn arg(&mut self) -> &mut Self {
+        self.request.push_str("?q=");
+        self
+    }
+
+    fn filename(&mut self, name: &str) -> &mut Self {
+        self.request.push_str("filename:");
+        self.request.push_str(&name);
+        self.request.push_str("+");
+        self
+    }
+
+    fn extension(&mut self, extension: &str) -> &mut Self {
+        self.request.push_str("extension:");
+        self.request.push_str(&extension);
+        self.request.push_str("+");
+        self
+    }
+
+    fn build(&self) -> &str {
+        &self.request
+    }
+}
+
 fn process_response(data: &[u8]) {
     stdout().write_all(data).unwrap();
     print!("\n");
@@ -9,7 +52,7 @@ fn process_response(data: &[u8]) {
 
 fn github_api_request(url: &str) -> Easy {
     let mut easy= Easy::new();
-    easy.url(&format!("https://api.github.com/{url}")).unwrap();
+    easy.url(&format!("https://api.github.com{url}")).unwrap();
     let mut header = List::new();
     header.append("User-Agent: Apollo-Package-Manager").unwrap();
     header.append("Accept: application/vnd.github+json").unwrap();
@@ -25,10 +68,13 @@ fn github_api_request(url: &str) -> Easy {
 }
 
 fn get_github_file(publisher: &str, repo: &str, file: &str) -> Easy {
-    let mut local_file = File::create_new(format!("./{file}")).unwrap();
+    let file_path = format!("./{file}");
+    
+    let mut local_file: File = File::create(file_path).unwrap();
+    
     let mut easy = Easy::new();
     easy.follow_location(true).unwrap();
-    easy.url(&format!("https://github.com/{publisher}/{repo}/blob/main/apollo.lib?raw=true")).unwrap();
+    easy.url(&format!("https://github.com/{publisher}/{repo}/blob/main/{file}?raw=true")).unwrap();
     easy.write_function(move |data| {
         local_file.write_all(data).unwrap();
         Ok(data.len())
@@ -38,7 +84,15 @@ fn get_github_file(publisher: &str, repo: &str, file: &str) -> Easy {
 }
 
 fn main() {
-    let mut easy = github_api_request("search/repositories?q=filename:apollo+extension:.lib");
+    let mut request = BuildAPIRequest::new();
+    let url: &str = request.search()
+                           .repo()
+                           .arg()
+                           .filename("apollo")
+                           .extension(".lib")
+                           .build();
+
+    let mut easy = github_api_request(url);
 
     let mut response = easy.response_code().unwrap();
     if response == 200 {
@@ -47,13 +101,16 @@ fn main() {
         println!("{} {}", Red.paint("Recieved Non-200 Response:"), Yellow.paint(format!("{response}")));
     }
 
-    easy = get_github_file("Nadelio", "Hades-Programming-Language", "apollo.lib");
+    println!("Testing rate limits...");
+    for _ in 1..100 {
+        easy = get_github_file("Nadelio", "Hades-Programming-Language", "README.md");
 
-    response = easy.response_code().unwrap();
-    if response == 200 {
-        println!("{}", Green.paint("Request Successful"));
-    } else {
-        println!("{} {}", Red.paint("Recieved Non-200 Response:"), Yellow.paint(format!("{response}")));
+        response = easy.response_code().unwrap();
+        if response == 200 {
+            println!("{}", Green.paint("Request Successful"));
+        } else {
+            println!("{} {}", Red.paint("Recieved Non-200 Response:"), Yellow.paint(format!("{response}")));
+        }
     }
 }
 
